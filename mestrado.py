@@ -4,7 +4,7 @@ import streamlit as st
 import plotly.express as px
 import folium
 from folium.plugins import Search
-from streamlit_folium import st_folium
+# from streamlit_folium import st_folium
 from streamlit_option_menu import option_menu
 
 # Configuração da página
