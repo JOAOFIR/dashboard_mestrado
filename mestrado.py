@@ -132,6 +132,7 @@ folium.LayerControl().add_to(m)
 if selected == "Mapa de Trajetórias":
     st.header("Trajetórias", divider=True)
     st.components.v1.html(folium.Figure().add_child(m).render(), width=1080, height=540)
+    st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
 
 # Gráfico de Barras
 if selected == "Gráfico de Barras Temporais":
@@ -139,7 +140,8 @@ if selected == "Gráfico de Barras Temporais":
 
     # Selecionando a coluna para análise
     campo = st.selectbox("Selecione o campo para contar valores repetidos:", ['day_x', 'period_x'])
-
+    st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
+    
     if campo:
         # Contando quantas vezes cada valor único aparece na coluna selecionada
         contagem = grid_origem[campo].value_counts().reset_index()
@@ -181,6 +183,7 @@ if selected == "Gráfico de Barras Temporais":
 # Exibindo a tabela de repetições para o campo 'grid_origem', apenas com duplicados
 if selected == "Tabela de Repetições Duplicadas":
     st.header("Tabela de Repetições Duplicadas para 'grid_origem'")
+    st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
 
     # Contando quantas vezes cada valor único aparece na coluna 'grid_origem'
     contagem = grid_origem['grid_origem'].value_counts()
