@@ -4,7 +4,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import folium
 from folium.plugins import Search
-from streamlit_folium import st_folium
+# from streamlit_folium import st_folium
 from streamlit_option_menu import option_menu
 import matplotlib.pyplot as plt
 from pydtmc import MarkovChain, HiddenMarkovModel
@@ -139,6 +139,7 @@ folium.LayerControl().add_to(m)
 if selected == "Mapa de Trajetórias":
     st.header("Trajetórias", divider=True)
     st.components.v1.html(folium.Figure().add_child(m).render(), width=1080, height=540)
+    st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
     st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
 
 # Gráfico de Barras
