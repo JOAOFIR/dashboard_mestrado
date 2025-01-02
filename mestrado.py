@@ -149,6 +149,9 @@ if selected == "Dados Consolidados":
 #     campo = st.selectbox("Selecione o campo para contar valores repetidos:", ['day_x', 'period_x'])
     st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
     df = pd.read_csv(r"experimento30122024v5.csv")
+    df['tile_ID_x_x_x'] = df['tile_ID_x_x_x'].astype(str)
+    df.rename({'VehId_x_x_x': 'VehId', 'id_x': 'Trip', 'day_x_x': 'dia', 'period_x_x':'turno'}, axis=1, inplace=True)
+    df = df[['VehId', 'Trip', 'dia', 'turno', 'Frequency_geo', 'Frequency_geo_day_period']]
     st.dataframe(df)
 
 
