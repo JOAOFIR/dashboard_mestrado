@@ -150,7 +150,7 @@ if selected == "Dados Consolidados":
     st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
     df = pd.read_csv(r"experimento30122024v5.csv")
     df['tile_ID_x_x_x'] = df['tile_ID_x_x_x'].astype(str)
-    df.rename({'VehId_x_x': 'VehId', 'id_x': 'Trip', 'tile_ID_x_x_x':'RótuloGrid', , 'day_x_x': 'dia', 'period_x_x': 'turno'}, axis=1, inplace=True)
+    df.rename({'VehId_x_x': 'VehId', 'id_x': 'Trip', 'tile_ID_x_x_x':'RótuloGrid', 'day_x_x': 'dia', 'period_x_x': 'turno'}, axis=1, inplace=True)
     df = df[['VehId', 'Trip', 'RótuloGrid', 'dia', 'turno', 'Frequency_geo', 'Frequency_geo_day_period']]
     st.dataframe(df)
 
