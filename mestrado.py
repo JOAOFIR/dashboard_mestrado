@@ -12,6 +12,7 @@ from sklearn.model_selection import KFold
 import numpy as np
 from scipy.stats import ttest_ind
 import matplotlib.lines as mlines
+from sklearn.metrics import precision_score
 
 
 # Configuração da página
@@ -27,7 +28,7 @@ st.set_page_config(
 with st.sidebar:
     selected = option_menu(
         menu_title="Análise Exploratória",
-        options=["Mapa de Trajetórias", "Dados Consolidados", "Predições"],
+        options=["Trajetórias para Cadeias de Markov", "Dados Consolidados", "Predições"],
     )
 
 # Carregar os dados
@@ -136,8 +137,8 @@ Search(
 folium.LayerControl().add_to(m)
 
 # Exibir o mapa
-if selected == "Mapa de Trajetórias":
-    st.header("Trajetórias", divider=True)
+if selected == "Trajetórias para Cadeias de Markov":
+    st.header("Trajetórias - Markov", divider=True)
     st.components.v1.html(folium.Figure().add_child(m).render(), width=1080, height=540)
     st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
 
@@ -148,10 +149,7 @@ if selected == "Dados Consolidados":
     # Selecionando a coluna para análise
 #     campo = st.selectbox("Selecione o campo para contar valores repetidos:", ['day_x', 'period_x'])
     st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
-    df = pd.read_csv(r"experimento30122024v5.csv")
-    df['tile_ID_x_x_x'] = df['tile_ID_x_x_x'].astype(str)
-    df.rename({'VehId_x_x': 'VehId', 'id_x': 'Trip', 'tile_ID_x_x_x':'RótuloGrid', 'day_x_x': 'dia', 'period_x_x': 'turno'}, axis=1, inplace=True)
-    df = df[['VehId', 'Trip', 'RótuloGrid', 'dia', 'turno', 'Frequency_geo', 'Frequency_geo_day_period']]
+    df = pd.read_csv(r"result_final12.csv")
     st.dataframe(df)
 
 
@@ -159,16 +157,18 @@ if selected == "Dados Consolidados":
 if selected == "Predições":
     st.header("Predições")
     st.caption("Fonte dos dados brutos: https://github.com/gsoh/VED.")
-    df = pd.read_csv(r"experimento30122024v5.csv")
-    df = df[(df['Frequency_geo'] >= 2)]
+    df = pd.read_csv(r"result_final12.csv")
+#    df = df[(df['Quantidade de Rotas Contadas'] >= 2)]
 
-    df['tile_ID_x_x_x'] = df['tile_ID_x_x_x'].astype(str)
-    df['dia_turno'] = df['day_x_x'].astype(str) + '_' + df['period_x_x'].astype(str)
+    df['grid_origem'] = df['grid_origem'].astype(str)
+#    df['dia_turno'] = df['day_x_x'].astype(str) + '_' + df['period_x_x'].astype(str)
 
-
+    filter = (df[df['Quantidade de Rotas Contadas'] >= 2])
+    filter = (filter[filter['Quantidade de Rotas Contadas - Turno'] >= 2])
+    df = filter.loc[filter.index.repeat(filter['Quantidade de Rotas Contadas'])].reset_index(drop=True)
     # Simulação de dados
     # Substitua esta parte pelos seus dados reais
-    veiculos_data = df.groupby("VehId_x_x")["tile_ID_x_x_x"].apply(list).to_dict()
+    veiculos_data = df.groupby("VehId")["grid_origem"].apply(list).to_dict()
 
     # Função para calcular a matriz de transição
     def calculate_transition_matrix(states):
@@ -196,12 +196,12 @@ if selected == "Predições":
         return transition_matrix, unique_states
 
     # Lista para armazenar resultados
-    resultados = []
+    resultados1 = []
 
     # Processar cada veículo
     for veiculo, sequencia in veiculos_data.items():
         kf = KFold(n_splits=10, shuffle=True, random_state=42)
-        acuracias = []
+        precisao_scores = []
 
         # Loop para os folds do KFold
         for fold, (train_index, test_index) in enumerate(kf.split(sequencia)):
@@ -211,53 +211,69 @@ if selected == "Predições":
             try:
                 matriz_transicao, estados = calculate_transition_matrix(X_train)
                 if matriz_transicao.size == 0:  # Pular se não há estados válidos
-                    acuracias.append(0)
+                    precisao_scores.append(0)
                     continue
 
                 mc = MarkovChain(matriz_transicao, states=estados)
             except ValueError as e:
                 print(f"Erro ao criar a matriz de transição para o veículo {veiculo}: {e}")
-                acuracias.append(0)
+                precisao_scores.append(0)
                 continue
 
-            # Predições e cálculo de acurácia
+            # Predições e cálculo de precision_score
             predicoes = []
+            reais = X_test[1:]  # Valores reais (os próximos estados nos testes)
+
             for estado_inicial in X_test[:-1]:
                 if estado_inicial in estados:
-                    proximo_estado_predito = mc.predict(initial_state=estado_inicial, steps=1)
-                    predicoes.append(proximo_estado_predito[0] if proximo_estado_predito else None)
+                    # Prevendo o próximo estado com base no estado inicial
+                    proximo_estado_predito = mc.predict(initial_state=estado_inicial, steps=1)  # steps=1 para prever um estado de cada vez
+
+                    # Garantindo que o retorno seja um valor simples (não lista ou array)
+                    if proximo_estado_predito:
+                        if isinstance(proximo_estado_predito, (list, np.ndarray)):
+                            predicoes.append(proximo_estado_predito[0])
+                        else:
+                            predicoes.append(proximo_estado_predito)
+                    else:
+                        predicoes.append(None)
                 else:
                     predicoes.append(None)
 
-            # Verificar alinhamento entre predições e teste
-            if len(predicoes) != len(X_test[1:]):
-                print(f"Erro de alinhamento: Veículo {veiculo}, Predições: {len(predicoes)}, Teste: {len(X_test[1:])}")
-                acuracias.append(0)
-                continue
 
-            # Calcular acurácia
-            acertos = sum(1 for p, r in zip(predicoes, X_test[1:]) if p == r and p is not None)
-            total = len(X_test) - 1
-            acuracia = acertos / total if total > 0 else 0
-            acuracias.append(acuracia)
+            # Filtrando valores None, pois precision_score não pode lidar com None
+            predicoes_filtradas = [p for p in predicoes if p is not None]
+            reais_filtrados = [r for r in reais if r is not None]
+
+            # Verificando se as listas de predições e reais têm o mesmo tamanho
+            if len(predicoes_filtradas) == len(reais_filtrados):
+                # Calculando a precisão com a métrica precision_score
+                precisao = precision_score(reais_filtrados, predicoes_filtradas, average='micro', zero_division=0)
+            else:
+                precisao = 0  # Caso o alinhamento entre predições e reais não seja correto
+
+
+            precisao_scores.append(precisao)
 
         # Registrar resultados para o veículo
-        erro_padrao = np.std(acuracias) / np.sqrt(len(acuracias))
-        for fold, acuracia in enumerate(acuracias):
-            resultados.append({"Veiculo": veiculo, "Fold": fold + 1, "Acuracia": acuracia, "Erro_Padrao": erro_padrao})
+        erro_padrao = np.std(precisao_scores) / np.sqrt(len(precisao_scores))
+        for fold, precisao in enumerate(precisao_scores):
+            resultados1.append({"Veiculo": veiculo, "Fold": fold + 1, "Precisao": precisao, "Erro_Padrao": erro_padrao})
 
     # Criar DataFrame final
-    df_resultados = pd.DataFrame(resultados)
+    df_resultados = pd.DataFrame(resultados1)
+    
+    # Group data by 'Veiculo' and calculate the mean of 'medias'
+    df_resultados['medias'] = df_resultados.groupby('Veiculo')['Precisao'].transform('mean')
+    media_por_veiculo_markov = df_resultados.groupby('Veiculo')['medias'].mean().reset_index()
 
 # Parte do HMM:
 
-    df.rename({'VehId_x_x': 'VehId', 'tile_ID_x_x_x': 'origem', 'tile_ID_y_y_y': 'destino', 'Frequency_geo_day_period': 'Frequency', 'day_x_x':'day_x', 'period_x_x':'period_x'}, axis=1, inplace=True)
-
-    # Função para calcular a matriz de emissão e transição
+# Função para calcular a matriz de emissão e transição
     def calcular_matriz_emissao_transicao(df):
-        df = df.copy()  # Evita problemas de cópia
-        df['observacao'] = df['day_x'].astype(str) + "_" + df['period_x'].astype(str)
-        df['estado_oculto'] = df['origem'].astype(str)
+    #     df_expandido = df.copy()  # Evita problemas de cópia
+        df['observacao'] = df['turno'].astype(str) # + "_" + df_expandido['turno'].astype(str)
+        df['estado_oculto'] = df['grid_origem'].astype(str)
 
         estados_unicos = sorted(df['estado_oculto'].unique())
         observacoes_unicas = sorted(df['observacao'].unique())
@@ -295,7 +311,7 @@ if selected == "Predições":
         return matriz_emissao, matriz_transicao, estados_unicos, observacoes_unicas
 
     # Iterar pelos veículos
-    resultados = []
+    resultados2 = []
 
     for veiculo_id in df['VehId'].unique():  # Iterando pelos veículos únicos
         print(f"Processando veículo {veiculo_id}...")
@@ -309,31 +325,31 @@ if selected == "Predições":
             train_data, test_data = veiculo_data.iloc[train_index].copy(), veiculo_data.iloc[test_index].copy()
 
             # Criando colunas para treino
-            train_data['observacao'] =  train_data['day_x'].astype(str) + "_" + train_data['period_x'].astype(str)
-            train_data['estado_oculto'] = train_data['origem'].astype(str)
+            train_data['observacao'] =  train_data['turno'].astype(str) # + "_" + train_data['turno'].astype(str)
+            train_data['estado_oculto'] = train_data['grid_origem'].astype(str)
 
             # Criando colunas para teste
-            test_data['observacao'] = test_data['day_x'].astype(str) + "_" + test_data['period_x'].astype(str)
-            test_data['estado_oculto'] = test_data['origem'].astype(str)
+            test_data['observacao'] = test_data['turno'].astype(str) # + "_" + test_data['turno'].astype(str)
+            test_data['estado_oculto'] = test_data['grid_origem'].astype(str)
 
             # Calculando as matrizes de emissão e transição para o conjunto de treino
             matriz_emissao_treino, matriz_transicao_treino, estados_treino, observacoes_treino = calcular_matriz_emissao_transicao(train_data)
 
             # Lidar com casos de apenas 1 estado
             if matriz_transicao_treino.shape[0] == 1:
-                print(f"Apenas 1 estado no conjunto de treino ({estados_treino[0]}). Acurácia definida como 0.0%.")
-                resultados.append({"Veiculo": veiculo_id, "Fold": fold + 1, "Acuracia": 0.0, "Erro_Padrao": 0.0})
+                print(f"Apenas 1 estado no conjunto de treino ({estados_treino[0]}). Precisao definida como 0.0%.")
+                resultados2.append({"Veiculo": veiculo_id, "Fold": fold + 1, "Precisao": 0.0, "Erro_Padrao": 0.0})
                 continue
 
             # Verificar validade das dimensões
             if matriz_transicao_treino.shape[0] != matriz_transicao_treino.shape[1]:
                 print(f"Conjunto de treino inválido: matriz de transição não é quadrada. Ignorando este fold.")
-                resultados.append({"Veiculo": veiculo_id, "Fold": fold + 1, "Acuracia": 0.0, "Erro_Padrao": 0.0})
+                resultados2.append({"Veiculo": veiculo_id, "Fold": fold + 1, "Precisao": 0.0, "Erro_Padrao": 0.0})
                 continue
 
             if matriz_emissao_treino.shape[0] != len(estados_treino) or matriz_emissao_treino.shape[1] != len(observacoes_treino):
                 print("Dimensões da matriz de emissão não correspondem aos estados ou observações. Ignorando este fold.")
-                resultados.append({"Veiculo": veiculo_id, "Fold": fold + 1, "Acuracia": 0.0, "Erro_Padrao": 0.0})
+                resultados2.append({"Veiculo": veiculo_id, "Fold": fold + 1, "Precisao": 0.0, "Erro_Padrao": 0.0})
                 continue
 
             # Criar o modelo HMM
@@ -356,166 +372,158 @@ if selected == "Predições":
             # Predição
             if not X_test_filtrado:
                 print("Nenhuma observação válida no conjunto de teste após filtrar.")
-                acuracia = 0.0
+                precisao = 0.0
             else:
                 # Realizar predição
                 y_pred = hmm.predict(prediction_type='viterbi', symbols=X_test_filtrado, initial_status=y, output_indices=False)
 
                 # Verificar se a predição é válida
                 if y_pred is None or y_pred[1] is None:
-    #                print("Predição inválida. Acurácia definida como 0.0%.")
-                    acuracia = 0.0
+                    precisao = 0.0
                 else:
                     # Filtrar estados ocultos correspondentes às observações filtradas
                     indices_validos = [i for i, symbol in enumerate(X_test) if symbol in observacoes_treino]
                     y_test_filtrado = [y_test[i] for i in indices_validos]
 
-                    # Calcular acurácia
-                    acertos = sum(1 for p, r in zip(y_pred[1], y_test_filtrado) if p == r)
-                    total = len(y_test_filtrado)
-                    acuracia = acertos / total if total > 0 else 0.0
+                    # Calcular precisão usando precision_score com média macro
+                    precisao = precision_score(y_test_filtrado, y_pred[1], average='micro', zero_division=0)
 
-            erro_padrao = np.std([acuracia]) / np.sqrt(1)  # Como há apenas uma acurácia por fold, o erro padrão é zero
-            resultados.append({"Veiculo": veiculo_id, "Fold": fold + 1, "Acuracia": acuracia, "Erro_Padrao": erro_padrao})
+            erro_padrao = np.std([precisao]) / np.sqrt(1)  # Como há apenas uma precisão por fold, o erro padrão é zero
+            resultados2.append({"Veiculo": veiculo_id, "Fold": fold + 1, "Precisao": precisao, "Erro_Padrao": erro_padrao})
 
-    # Criar DataFrame final
-    df_resultadoshmm = pd.DataFrame(resultados)
+            erro_padrao = 0.0  # como só temos uma amostra por fold, o erro padrão será 0
+            resultados2.append({
+                "Veiculo": veiculo_id,
+                "Fold": fold + 1,
+                "Precisao": precisao,
+                "Erro_Padrao": erro_padrao
+            })
 
-# Final:
-    resultados_markov = df_resultados
-    resultados = pd.DataFrame(resultados)
-    # Verificar se ambos os DataFrames têm a mesma estrutura e são compatíveis para o teste
-    # assert len(resultados) == len(resultados_markov), "Os DataFrames devem ter o mesmo número de linhas"
-    # assert "Acuracia" in resultados.columns and "Acuracia" in resultados_markov.columns, "Ambos os DataFrames devem conter a coluna 'Acuracia'"
-
-    # Reshape dos dados em (30 veículos, 10 folds)
-    acuracias_resultados = df_resultados["Acuracia"].values.reshape(30, 10)  # 30 veículos, 10 folds
-    acuracias_markov = df_resultadoshmm["Acuracia"].values.reshape(30, 10)  # 30 veículos, 10 folds
-
+# Criar DataFrame final
+    hmm = pd.DataFrame(resultados2)
+    
+    
+    hmm['medias'] = hmm.groupby('Veiculo')['Precisao'].transform('mean')
+    media_por_veiculo_markovhmm = hmm.groupby('Veiculo')['medias'].mean().reset_index()
     # Inicializar lista para armazenar os valores de p e médias
     p_values = []
-    medias_resultados = [np.mean(acuracias_resultados[i]) for i in range(30)]
-    medias_markov = [np.mean(acuracias_markov[i]) for i in range(30)]
+    medias_resultados = []
+    medias_markov = []
 
     # Calcular o valor de p para cada veículo (comparação entre os dois conjuntos de dados)
+    veh_ids = df_resultados["Veiculo"].unique()
     for i in range(30):  # Para cada veículo
-        _, p_value = ttest_ind(acuracias_resultados[i], acuracias_markov[i])
+        # Obter as precisões do veículo i
+        precisao_resultado = df_resultados[df_resultados['Veiculo'] == veh_ids[i]]['Precisao'].values
+        precisao_hmm = hmm[hmm['Veiculo'] == veh_ids[i]]['Precisao'].values
+
+        # Calcular a média para cada veículo
+        medias_resultados.append(np.mean(precisao_resultado))
+        medias_markov.append(np.mean(precisao_hmm))
+
+        # Comparar as precisões do veículo i entre os dois conjuntos de dados
+        _, p_value = ttest_ind(precisao_resultado, precisao_hmm)
         p_values.append(p_value)
 
-    # Obter os 5 menores valores de p e os veículos correspondentes
-    indices_menores_p = np.argsort(p_values)[:5]  # Indices dos 5 menores p-valores
-
-    # Primeiro gráfico: Comparação de acurácias por veículo
-    fig1 = go.Figure()
+    # Obter os 30 menores valores de p e os veículos correspondentes
+    indices_menores_p = np.argsort(p_values)[:30]  # Índices dos 30 menores p-valores
 
     indices = np.arange(1, 31)  # 30 veículos
+    width = 0.4  # Largura das barras
 
-    fig1.add_trace(go.Bar(x=indices, y=medias_resultados, name='Markov', marker_color='skyblue'))
-    fig1.add_trace(go.Bar(x=indices, y=medias_markov, name='HMM', marker_color='orange'))
+    # Posicionar os veículos no eixo X
+    x_ticks = [str(veh_ids[i]) for i in range(30)]
+    x_markov = indices - width / 2
+    x_hmm = indices + width / 2
+
+    # Criar o primeiro gráfico: Comparação de precisões por veículo (usando plotly)
+    fig1 = go.Figure()
+
+    # Trace único para Cadeias de Markov
+    fig1.add_trace(go.Bar(
+        x=x_markov,
+        y=medias_resultados,
+        name="Cadeias de Markov",
+        marker=dict(color='skyblue')
+    ))
+
+    # Trace único para Cadeias Ocultas de Markov
+    fig1.add_trace(go.Bar(
+        x=x_hmm,
+        y=medias_markov,
+        name="Cadeias Ocultas de Markov",
+        marker=dict(color='orange')
+    ))
 
     # Configuração do primeiro gráfico
     fig1.update_layout(
-        title='Comparação de Acurácias por Veículo',
-        xaxis_title='Veículos',
-        yaxis_title='Acurácia Média (%)',
-        barmode='group'
+        title="Comparação de Precisões por Veículo",
+        xaxis=dict(
+            title="VehId",
+            tickvals=indices,
+            ticktext=x_ticks,
+            tickangle=45
+        ),
+        yaxis=dict(title="Precisão Média (%)"),
+        barmode='group',
+        showlegend=True
     )
 
-    # Legenda com os 5 menores valores de p
-    for i in range(5):
-        fig1.add_annotation(
-            x=indices_menores_p[i] + 1,
-            y=max(medias_resultados[indices_menores_p[i]], medias_markov[indices_menores_p[i]]) + 1,
-            text=f"p = {p_values[indices_menores_p[i]]:.3e}",
-            showarrow=True,
-            arrowhead=2,
-            ax=0,
-            ay=-20
-        )
-
-    # Segundo gráfico: Comparação de médias globais
-    media_global_markov = np.mean(medias_markov)
-    media_global_hmm = np.mean(medias_resultados)
-
-    fig2 = go.Figure()
-    fig2.add_trace(go.Bar(x=["Markov", "HMM"], y=[media_global_markov, media_global_hmm], marker_color=["skyblue", "orange"]))
-
-    fig2.update_layout(
-        title='Comparação de Acurácia Média Global',
-        xaxis_title='Método',
-        yaxis_title='Acurácia Média (%)'
-    )
-
-    # Terceiro gráfico: Veículos com os menores valores de p
-    fig3 = go.Figure()
-
-    for i in range(5):
-        idx = indices_menores_p[i]
-        fig3.add_trace(go.Bar(
-            x=[f"Veículo {idx + 1}"],
-            y=[medias_resultados[idx]],
-            name=f"Markov Veículo {idx + 1}",
-            marker_color='skyblue'
-        ))
-        fig3.add_trace(go.Bar(
-            x=[f"Veículo {idx + 1}"],
-            y=[medias_markov[idx]],
-            name=f"HMM Veículo {idx + 1}",
-            marker_color='orange'
-        ))
-
-    # Terceiro gráfico: Valores de p dos 5 menores veículos
-    fig3 = go.Figure()
-
-    for i in range(5):
-        idx = indices_menores_p[i]
-        fig3.add_trace(go.Bar(
-            x=[f"Veículo {idx + 1}"],
-            y=[p_values[idx]],
-            name=f"Veículo {idx + 1}",
-            marker_color='purple'
-        ))
-
-    fig3.update_layout(
-        title='Valores de p dos 5 Veículos com Menores Valores de p',
-        xaxis_title='Veículos',
-        yaxis_title='Valor de p',
-        barmode='group'
-    )
-
-    # Exibir gráficos no Streamlit
+    # Exibir o primeiro gráfico no Streamlit
     st.plotly_chart(fig1)
+
+    # ------------------------------------------
+    # Segundo gráfico: Comparação de p-values (ordenado por veh_ids)
+    fig2 = go.Figure()
+
+    # Ordenar p-values pelos 30 menores
+    sorted_p_values = [p_values[i] for i in indices_menores_p]
+    sorted_veh_ids = [veh_ids[i] for i in indices_menores_p]
+
+    # Adicionar barras para p-values
+    fig2.add_trace(go.Bar(
+        x=sorted_veh_ids,
+        y=sorted_p_values,
+        marker=dict(color='lightcoral')
+    ))
+
+    # Configuração do segundo gráfico
+    fig2.update_layout(
+        title="P-Values por VehId (Ordenados)",
+        xaxis=dict(
+            title="VehId",
+            tickvals=sorted_veh_ids,
+            tickangle=45
+        ),
+        yaxis=dict(title="P-Value"),
+        showlegend=False
+    )
+
+    # Exibir o segundo gráfico no Streamlit
     st.plotly_chart(fig2)
 
-    # Terceiro gráfico: Quadro com os 5 menores valores de p usando Matplotlib
-    fig3, ax3 = plt.subplots(figsize=(6, 3))
-    ax3.axis('off')
+    # ------------------------------------------
+    # Terceiro gráfico: Comparação de médias globais
+    media_global_markov = df_resultados['Precisao'].mean()
+    media_global_hmm = hmm['Precisao'].mean()
 
-    # Legenda com os 5 menores valores de p
-    legend_labels = [
-        f"Veículo {indices_menores_p[i] + 1} - p = {p_values[indices_menores_p[i]]:.3e}"
-        for i in range(5)
-    ]
+    fig3 = go.Figure()
 
-    # Criar setas vermelhas para a legenda
-    legend_handles = [
-        mlines.Line2D([0, 1], [0, 0], color='red', marker='>', markersize=10, label=legend_labels[i])
-        for i in range(5)
-    ]
+    # Adicionar barras para as médias globais
+    fig3.add_trace(go.Bar(
+        x=["Markov", "Markov Oculto"],
+        y=[media_global_markov, media_global_hmm],
+        marker=dict(color=["skyblue", "orange"]),
+        width=0.6
+    ))
 
-    # Adicionar a legenda com as setas
-    ax3.legend(handles=legend_handles, loc='upper left', bbox_to_anchor=(-0.3, 1), fontsize=10, title="5 menores valores de p", title_fontsize=12)
+    # Configuração do terceiro gráfico
+    fig3.update_layout(
+        title="Comparação de Precisão Média Global",
+        xaxis=dict(title="Método"),
+        yaxis=dict(title="Precisão Média (%)"),
+        showlegend=False
+    )
 
-    # Ajustar o layout para evitar que a legenda sobreponha o gráfico
-    plt.tight_layout()
-
-    # Exibir o gráfico com a legenda de setas
-#    st.subheader("5 Menores Valores de p")
-    st.pyplot(fig3)
-
-
-
-
-
-
-
+    # Exibir o terceiro gráfico no Streamlit
+    st.plotly_chart(fig3)
